@@ -5,10 +5,10 @@
 **NICHT FÜR DEN ECHTEN EINSATZ BESTIMMT**
 
 ## 📜 Hintergrund
-Dieses Skript entstand aus einer lockeren Wette heraus ("Kann man das eigentlich automatisieren?") und dient ausschließlich als Proof of Concept. Es demonstriert grundlegende Browser-Automatisierungskonzepte und hat nicht die Absicht effektiv genutzt zu werden.
+Dieses Skript entstand aus einer lockeren Wette heraus ("Kann man das eigentlich automatisieren?") und dient ausschließlich als Proof of Concept. Es demonstriert grundlegende Browser-Automatisierungskonzepte und hat nicht die Absicht genutzt zu werden.
 
 ## ❗️ Wichtige Hinweise
-- 🚫 **Nicht mit echten Accounts verwenden!**
+- 🚫 **Nicht verwenden!**
 - 🔒 Verstößt gegen §3 Absatz 5 der [Leitstellenspiel-Nutzungsbedingungen](https://www.leitstellenspiel.de/agb)
 - ⚖️ Kann zu Account-Sperrungen führen
 - 🧪 Enthält experimentellen/ungetesteten Code
