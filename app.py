@@ -38,13 +38,13 @@ VEHICLE_MAPPINGS = {
     "Löschfahrzeug": "LF",
     "MTW": "MTW",
     "Rüstwagen": "RW",
-    "Tanklöschfahrzeug": "TLF",
-    "Werkfeuerwehr-Gerätewagenr": "WF-GW",
-    "Werkfeuerwehr-Teleskoplader": "WF-TL",
-    "Werkfeuerwehr-Turbolöscher": "WF-TM",
-    "Werkfeuerwehr-Universal-Löschfahrzeug": "WF-ULF",
+    "TLF": "TLF",
+    "WF-GW": "WF-GW",
+    "WF-TL": "WF-TL",
+    "WF-TM": "WF-TM",
+    "WF-ULF": "WF-ULF",
     "First Responder": "First Responder",
-    "Großraumrettungswagen": "G-RTW",
+    "G-RTW": "G-RTW",
     "KdoW LNA": "KdoW LNA",
     "KdoW OrgL": "KdoW OrgL",
     "KTW": "KTW",
@@ -53,13 +53,13 @@ VEHICLE_MAPPINGS = {
     "RTH": "RTH",
     "RTW": "RTW",
     "FüKw": "FüKw",
-    "Streifenwagen": "FuStW",
-    "Gefangenenkraftwagen": "GefKw",
-    "Gruppenkraftwagen": "GruKw",
-    "Diensthundeführerkraftwagen": "IeBeKw",
+    "FuStW": "FuStW",
+    "GefKw": "GefKw",
+    "GruKw": "GruKw",
+    "IeBeKw": "IeBeKw",
     "MEK-MTF": "MEK-MTF",
     "MEK-ZF": "MEK-ZF",
-    "Polizeihubschrauber": "Pol-Hub",
+    "Pol-Hub": "Pol-Hub",
     "SEK-MTF": "SEK-MTF",
     "SEK-ZF": "SEK-ZF",
     "Wasserwerfer": "WaWe",
@@ -68,17 +68,17 @@ VEHICLE_MAPPINGS = {
     "KTW Typ B": "KTW Typ B",
     "MANV 10": "MANV 10",
     "MANV 5": "MANV 5",
-    "Wasserrettung-Gerätewagen": "WR-GW",
-    "Wasserrettung-Taucher": "WR-GW-Taucher",
-    "Mehrzweckboot": "WR-MZB",
-    "Anhänger Drucklufterzeugung": "AH DLE",
-    "Anhänger-Mehrzweckarbeitsboot": "AH-MzAB",
-    "Anhänger-Mehrzweckboot": "AH-MzB",
-    "Anhänger-Schlaucboot": "AH-SchlB",
-    "Bergeräumgerät": "BRmG R",
+    "WR-GW": "WR-GW",
+    "WR-GW-Taucher": "WR-GW-Taucher",
+    "WR-MZB": "WR-MZB",
+    "AH DLE": "AH DLE",
+    "AH-MzAB": "AH-MzAB",
+    "AH-MzB": "AH-MzB",
+    "AH-SchlB": "AH-SchlB",
+    "BRmG R": "BRmG R",
     "GKW": "GKW",
-    "LKW Kipper": "LKW K 9",
-    "Ladekran": "LKW Lgr 19tm",
+    "LKW K 9": "LKW K 9",
+    "LKW Lgr 19tm": "LKW Lgr 19tm",
     "MLW 5": "MLW 5",
     "MTW-TZ": "MTW-TZ",
     "Mehrzweckkraftwagen": "MzKW",
@@ -125,18 +125,22 @@ def smart_vehicle_match(vehicle_name):
 
 def extract_current_vehicles(driver):
     current_vehicles = {}
+    enroute_personnel = 0
     sleep(0.125)
     try:
         driving_table = driver.find_element(By.ID, 'mission_vehicle_driving')
         rows = driving_table.find_elements(By.TAG_NAME, 'tr')
         for row in rows[1:]:
             cells = row.find_elements(By.TAG_NAME, 'td')
-            if len(cells) >= 2:
+            if len(cells) >= 3:
                 vehicle_cell = cells[1].text
+                personnel_text = cells[2].text.strip()
                 if '(' in vehicle_cell and ')' in vehicle_cell:
                     raw_type = vehicle_cell.split('(')[1].split(')')[0].strip()
                     matched_type = smart_vehicle_match(raw_type)
                     current_vehicles[matched_type] = current_vehicles.get(matched_type, 0) + 1
+                if personnel_text.isdigit():
+                    enroute_personnel += int(personnel_text)
     except Exception as e:
         logging.error(f"Error reading driving vehicles: {str(e)}")
     sleep(0.25)
@@ -154,7 +158,7 @@ def extract_current_vehicles(driver):
     except Exception as e:
         logging.error(f"Error reading vehicles at mission: {str(e)}")
     sleep(0.25)
-    return current_vehicles
+    return current_vehicles, enroute_personnel
 
 def extract_vehicle_requirements(table):
     requirements = {}
@@ -248,18 +252,26 @@ def extract_missing_water(driver):
     except Exception as e:
         logging.warning(f"No missing water div found or there is an error")
         # logging.error(f"Error extracting missing water: {str(e)}")
-    return 0  # Kein Wasserbedarf
+    return 0  # Kein Wasser benötigt lol
 
-def handle_patients_and_nef(driver, required_vehicles, current_vehicles, min_patients, nef_probability):
+def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute_personnel, min_patients, nef_probability):
+    # Falls enroute_personnel mal None sein sollte
+    if enroute_personnel is None:
+        enroute_personnel = 0
+
     actual_count, nef_in_divs = extract_actual_patients(driver)
     final_patient_count = max(min_patients, actual_count)
     current_rtw = current_vehicles.get("RTW", 0)
     current_nef = current_vehicles.get("NEF", 0)
 
+    needed_rtw = max(0, final_patient_count - current_rtw)
+    needed_nef_total = max(0, nef_in_divs - current_nef)
+    needed_nef = 1 if needed_nef_total > 0 else 0
+
     # RTW-Anforderung
     needed_rtw = max(0, final_patient_count - current_rtw)
 
-    # NEF-Anforderung nur 1 pro Durchlauf, falls benötigt
+    # max ein NEF
     needed_nef_total = max(0, nef_in_divs - current_nef)
     needed_nef = 1 if needed_nef_total > 0 else 0
 
@@ -281,15 +293,22 @@ def handle_patients_and_nef(driver, required_vehicles, current_vehicles, min_pat
     elif needed_nef > 0:
         required_vehicles["NEF"] = required_vehicles.get("NEF", 0) + needed_nef
 
-    # Wenn kein NEF gesendet wurde, aber benötigt wird -> NAW
-    # (only 1 NEF needed per pass, if we can't select NEF => NAW)
+    # kein NEF gesendet, aber wird halt benötigt lol -> NAW als Backup senden
     if needed_nef > 0 and required_vehicles.get("NEF", 0) <= current_nef:
         logging.info("NEF required but not available, dispatching NAW as backup")
         required_vehicles["NAW"] = required_vehicles.get("NAW", 0) + needed_nef
         required_vehicles["NEF"] = current_nef
 
-    # Fehlendes Personal auslesen und pro 3 Personen ein LF anfordern
-    missing_personnel = extract_missing_personnel(driver)
+    # Fehlendes Personal auslesen | 3 Pro LF - verstellbar
+    try:
+        missing_personnel = extract_missing_personnel(driver)
+        if missing_personnel is None:
+            missing_personnel = 0
+        missing_personnel = max(0, missing_personnel - enroute_personnel)
+    except Exception as e:
+        logging.error(f"Error extracting missing personnel: {str(e)}")
+        missing_personnel = 0
+
     if missing_personnel > 0:
         lf_needed = (missing_personnel + 2) // 3
         required_vehicles["LF"] = required_vehicles.get("LF", 0) + lf_needed
@@ -310,7 +329,6 @@ def set_mission_speed(driver, desired_speed):
     current_speed = None
     try:
         pause_element = driver.find_element(By.ID, 'mission_speed_pause')
-        play_element = driver.find_element(By.ID, 'mission_speed_play')
         if pause_element.value_of_css_property("display") == "flex":
             current_speed = "pause"
         else:
@@ -323,14 +341,15 @@ def set_mission_speed(driver, desired_speed):
         sleep(0.125)
         driver.close()
         driver.switch_to.window(driver.window_handles[0])
-    elif desired_speed == "0" and current_speed == "pause":
-        driver.execute_script("window.open('/missionSpeed?speed=0','_blank')")
+    elif desired_speed == "7" and current_speed == "pause":
+        driver.execute_script("window.open('/missionSpeed?speed=7','_blank')")
         driver.switch_to.window(driver.window_handles[-1])
         sleep(0.125)
         driver.close()
         driver.switch_to.window(driver.window_handles[0])
 
 def select_vehicles(driver, required_vehicles, alarm_after_selection=True):
+    selected_any = False
     for vehicle_type, count in required_vehicles.items():
         logging.info(f"Preparing to select {count} vehicle(s) of type '{vehicle_type}'")
         vehicle_links = driver.find_elements(By.CLASS_NAME, 'aao_searchable')
@@ -355,6 +374,7 @@ def select_vehicles(driver, required_vehicles, alarm_after_selection=True):
                     availability_span = matched_link.find_element(By.XPATH, ".//span[starts-with(@id,'available_aao_')]")
                     if "label-success" in availability_span.get_attribute("class"):
                         matched_link.click()
+                        selected_any = True
                         logging.info(f"Selected vehicle: {vehicle_type}")
                     else:
                         logging.info(f"No vehicles available for {vehicle_type}. Skipping.")
@@ -370,33 +390,36 @@ def select_vehicles(driver, required_vehicles, alarm_after_selection=True):
         alarm_button = driver.find_element(By.ID, 'mission_alarm_btn')
         alarm_button.click()
         logging.info("Alarm button clicked")
-        sleep(6)
+        sleep(4.5)
+    return selected_any
 
 def handle_water_and_dispatch(driver, missing_vehicles):
     logging.info("Dispatching all required vehicles first, then recalculate missing water.")
-    # Erst alle fehlenden Fahrzeuge auswählen (nicht alarmieren, damit deren Wasser mitberechnet wird)
     if missing_vehicles:
         select_vehicles(driver, missing_vehicles, alarm_after_selection=False)
-        logging.info("Main vehicles dispatched without alarm.")
     else:
         select_vehicles(driver, {}, alarm_after_selection=False)
-        logging.info("No vehicles needed, but selecting an empty set without alarm to update UI.")
 
-    # Jetzt den fehlenden Wasserbedarf erneut berechnen
     missing_water = extract_missing_water(driver)
     logging.info(f"Missing water after dispatching main vehicles: {missing_water}")
     iteration = 0
     while missing_water > 0:
         iteration += 1
         logging.info(f"Iteration {iteration} - Missing water: {missing_water} - dispatching LF")
-        select_vehicles(driver, {"LF": 1}, alarm_after_selection=False)
+        selected = select_vehicles(driver, {"LF": 1}, alarm_after_selection=False)
+        if not selected:
+            logging.warning("No more LFs available. Closing this mission tab and returning.")
+            driver.close()
+            if driver.window_handles:
+                driver.switch_to.window(driver.window_handles[0])
+            return True
         sleep(0.2)
         missing_water = extract_missing_water(driver)
         logging.info(f"Missing water after LF dispatch: {missing_water}")
 
     logging.info("No further water needed, alarming now.")
-    # Abschließend Alarm auslösen
     select_vehicles(driver, {}, alarm_after_selection=True)
+    return False
 
 def check_for_sprechwunsch(driver, wait):
     try:
@@ -473,28 +496,39 @@ def main():
             while True:
                 try:
                     driver.get('https://www.leitstellenspiel.de/')
-                    driver.refresh()
+                    sleep(0.25)
+                    try:
+                        finishing_button = driver.find_element(By.ID, 'mission_select_finishing')
+                        finishing_button.click()
+                        logging.info("Finishing filter button clicked")
+                    except Exception as e:
+                        logging.warning(f"Could not click finishing filter button: {str(e)}")
+                    # driver.refresh()
                     sleep(0.25)
                     wait = WebDriverWait(driver, 10)
                     mission_list = wait.until(EC.presence_of_element_located((By.ID, 'mission_list')))
                     mission_entries = driver.find_elements(By.CLASS_NAME, 'missionSideBarEntry')
-                    non_verband_missions = [
-                        mission for mission in mission_entries
-                        if not mission.find_element(By.CLASS_NAME, 'map_position_mover').text.startswith('[Verband]')
+                    non_finishing_missions = [
+                        m for m in mission_entries
+                        if (
+                            m.get_attribute("data-mission-state-filter") != "finishing" and 
+                            "[Verband]" not in m.find_element(By.CLASS_NAME, 'map_position_mover').text
+                        )
                     ]
-                    if len(non_verband_missions) > 6:
+                    if len(non_finishing_missions) > 6:
                         set_mission_speed(driver, "pause")
-                    else:
-                        set_mission_speed(driver, "0")
-                    logging.info(f"Found {len(non_verband_missions)} non-Verband missions")
+                        logging.info("Mission speed set to pause")
+                    if len(non_finishing_missions) < 6:
+                        set_mission_speed(driver, "7")
+                        logging.info("Mission speed set to 7")
+                    logging.info(f"Found {len(non_finishing_missions)} non-Verband missions")
                     sleep(0.225)
-                    for mission in mission_entries:
+                    for mission in non_finishing_missions:
                         try:
                             sleep(0.15)
                             mission_caption = mission.find_element(By.CLASS_NAME, 'map_position_mover').text
                             if "Verband" in mission_caption:
-                                logging.info("Verband mission detected, closing...")
-                                mission.close()
+                                logging.info("Verband mission detected, skipping.")
                                 continue
                             sleep(0.05)
                             alarm_button = mission.find_element(By.CLASS_NAME, 'mission-alarm-button')
@@ -523,7 +557,7 @@ def main():
                                     driver.close()
                                     driver.switch_to.window(driver.window_handles[-1])
                                     continue
-                                current_vehicles = extract_current_vehicles(driver)
+                                current_vehicles, enroute_personnel = extract_current_vehicles(driver)
                                 sleep(0.05)
                                 help_button = driver.find_element(By.ID, 'mission_help')
                                 help_url = help_button.get_attribute('href')
@@ -544,17 +578,19 @@ def main():
                                     driver.switch_to.window(driver.window_handles[-1])
                                     sleep(0.05)
                                     required_vehicles = handle_patients_and_nef(
-                                        driver, required_vehicles, current_vehicles, min_patients, nef_probability
+                                        driver, required_vehicles, current_vehicles, enroute_personnel, min_patients, nef_probability
                                     )
                                     missing_vehicles = calculate_missing_vehicles(required_vehicles, current_vehicles)
                                     sleep(0.05)
 
                                     # Immer handle_water_and_dispatch aufrufen
-                                    handle_water_and_dispatch(driver, missing_vehicles)
+                                    closed_tab = handle_water_and_dispatch(driver, missing_vehicles)
+                                    if closed_tab:
+                                        logging.info("Tab closed due to insufficient LFs. Skipping further steps.")
+                                        continue
 
                                     if missing_vehicles:
                                         logging.info("Vehicles dispatched")
-                                        # New logic to handle if NEF was not dispatched
                                         if "NEF" in missing_vehicles:
                                             required_vehicles["NAW"] = required_vehicles.get("NAW", 0) + 1
                                             logging.info("NEF not dispatched, dispatching NAW as backup")
@@ -581,8 +617,8 @@ def main():
                                 continue
                             logging.error(f"Error processing mission: {str(e)}")
                             continue
-                    logging.info("Mission processing completed, waiting 30 seconds")
-                    sleep(30)
+                    logging.info("Mission processing completed, waiting 20 seconds")
+                    sleep(20)
                 except Exception as e:
                     logging.error(f"Error in mission loop: {str(e)}")
                     try:
