@@ -4,8 +4,6 @@
 **NUTZUNG VERSTÖSST GEGEN DIE LEITSTELLENSPIEL-NUTZUNGSBEDINGUNGEN**  
 **NICHT FÜR DEN ECHTEN EINSATZ BESTIMMT**
 
-![Leitstellenspiel-Logo](https://www.leitstellenspiel.de/images/lss_logo.png)
-
 ## 📜 Hintergrund
 Dieses Skript entstand aus einer lockeren Wette heraus ("Kann man das eigentlich automatisieren?") und dient ausschließlich als Proof of Concept. Es demonstriert grundlegende Browser-Automatisierungskonzepte und hat nicht die Absicht effektiv genutzt zu werden.
 
