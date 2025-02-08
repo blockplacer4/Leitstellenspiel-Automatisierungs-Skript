@@ -23,6 +23,7 @@ VEHICLE_MAPPINGS = {
     "Flughafen-Löschfahrzeug": "Flgh-FLF",
     "Rettungstreppen": "Flgh-RTF",
     "Feuerwehrkran": "FwK",
+    "Feuerwehrkräne (FwK)": "FwK",
     "GW-A": "GW-A",
     "GW-Atemschutz": "GW-A",
     "Gerätewagen-Atemschutz": "GW-A",
@@ -30,7 +31,7 @@ VEHICLE_MAPPINGS = {
     "GW-Höhenrettung": "GW-H",
     "GW-Messtechnik": "GW-M",
     "GW-Öl": "GW-ÖL",
-    "GW-Sanität": "GW-S",
+    "GW-S": "GW-S",
     "GW-Mess": "GW-M",
     "GW-L2": "GW-L2",
     "SW 1000": "GW-L2",
@@ -170,7 +171,8 @@ def extract_vehicle_requirements(table):
                 vehicle_text = cells[0].text.strip()
                 value_text = cells[1].text.strip()
                 
-                if "feuerwehrleute" in vehicle_text.lower():
+                # Jetzt werden auch "feuerwehrmann" berücksichtigt (Singular oder Plural)
+                if "feuerwehrleute" in vehicle_text.lower() or "feuerwehrmann" in vehicle_text.lower():
                     total_firefighters = int(value_text)
                     lf_count = (total_firefighters + 2) // 3
                     requirements["LF"] = requirements.get("LF", 0) + lf_count
@@ -255,25 +257,32 @@ def extract_missing_water(driver):
     return 0  # Kein Wasser benötigt lol
 
 def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute_personnel, min_patients, nef_probability):
-    # Falls enroute_personnel mal None sein sollte
+    # Falls enroute_personnel None sein sollte
     if enroute_personnel is None:
         enroute_personnel = 0
 
     actual_count, nef_in_divs = extract_actual_patients(driver)
     final_patient_count = max(min_patients, actual_count)
+
+    # Für NEF: Zähle NEF und NAW als Ersatz zusammen
+    current_nef = current_vehicles.get("NEF", 0) + current_vehicles.get("NAW", 0)
     current_rtw = current_vehicles.get("RTW", 0)
-    current_nef = current_vehicles.get("NEF", 0)
 
+    # RTW-Anforderung: fehlt die Differenz zwischen final_patient_count und vorhandenen RTWs
     needed_rtw = max(0, final_patient_count - current_rtw)
+    # Für NEF: maximal ein NEF benötigt, falls bislang keiner (bzw. kein NAW als Ersatz) unterwegs ist
     needed_nef_total = max(0, nef_in_divs - current_nef)
     needed_nef = 1 if needed_nef_total > 0 else 0
 
-    # RTW-Anforderung
-    needed_rtw = max(0, final_patient_count - current_rtw)
-
-    # max ein NEF
-    needed_nef_total = max(0, nef_in_divs - current_nef)
-    needed_nef = 1 if needed_nef_total > 0 else 0
+    # Bestehende LNA-Anforderungen (angenommen "Benötigte LNA" kommt als Schlüssel in required_vehicles vor)
+    required_lna = required_vehicles.get("LNA", 0)
+    if required_lna:
+        # Nur ein KdoW LNA senden – sofern noch keiner unterwegs ist
+        if current_vehicles.get("KdoW LNA", 0) < 1:
+            required_vehicles["KdoW LNA"] = 1
+        # Übergebe/überschreibe den ursprünglichen LNA-Schlüssel
+        if "LNA" in required_vehicles:
+            del required_vehicles["LNA"]
 
     if needed_rtw > 0 and needed_nef > 0:
         current_naw = current_vehicles.get("NAW", 0)
@@ -293,13 +302,12 @@ def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute
     elif needed_nef > 0:
         required_vehicles["NEF"] = required_vehicles.get("NEF", 0) + needed_nef
 
-    # kein NEF gesendet, aber wird halt benötigt lol -> NAW als Backup senden
-    if needed_nef > 0 and required_vehicles.get("NEF", 0) <= current_nef:
-        logging.info("NEF required but not available, dispatching NAW as backup")
-        required_vehicles["NAW"] = required_vehicles.get("NAW", 0) + needed_nef
-        required_vehicles["NEF"] = current_nef
+    # Falls NEF benötigt wird, aber noch keiner unterwegs ist, 
+    # könnte bereits ein NAW als NEF gesendet worden sein – hier ist zusätzlich keine weitere NEF-Alarmierung nötig.
+    if needed_nef > 0 and current_nef > 0:
+        logging.info("NEF requirement already met by NEF/NAW on route.")
 
-    # Fehlendes Personal auslesen | 3 Pro LF - verstellbar
+    # Fehlendes Personal auslesen | 3 Pro LF als Faustregel
     try:
         missing_personnel = extract_missing_personnel(driver)
         if missing_personnel is None:
@@ -471,6 +479,31 @@ def check_mission_completed(driver):
         pass
     return False
 
+def check_and_click_easter_egg(driver):
+    try:
+        heart_link = driver.find_element(By.ID, "easter-egg-link")
+        heart_link.click()
+        sleep(1)
+        logging.info("Easter egg found and clicked, waiting 1 second.")
+    except Exception as e:
+        logging.info(f"No Easter egg found or unable to click")
+
+def extract_additional_requirements(driver):
+    additional = {}
+    try:
+        mission_info = driver.find_element(By.ID, 'mission_info')
+        info_text = mission_info.text
+        import re
+        match = re.search(r'\d+\s+Person(?:en)?\s+mit\s+([\w\-\(\) ]+)-Ausbildung', info_text, re.IGNORECASE)
+        if match:
+            vehicle_raw = match.group(1).strip()
+            matched_vehicle = smart_vehicle_match(vehicle_raw)
+            additional[matched_vehicle] = 1  # Unabhängig der Zahl wird nur 1 alarmiert
+            logging.info(f"Additional requirement extracted: 1 x {matched_vehicle} (aus '{vehicle_raw}-Ausbildung')")
+    except Exception as e:
+        logging.info("No additional requirements found on mission page.")
+    return additional
+
 def main():
     while True:
         try:
@@ -515,7 +548,7 @@ def main():
                             "[Verband]" not in m.find_element(By.CLASS_NAME, 'map_position_mover').text
                         )
                     ]
-                    if len(non_finishing_missions) > 6:
+                    if len(non_finishing_missions) > 4:
                         set_mission_speed(driver, "pause")
                         logging.info("Mission speed set to pause")
                     if len(non_finishing_missions) < 6:
@@ -550,6 +583,8 @@ def main():
                                     driver.close()
                                     driver.switch_to.window(driver.window_handles[0])
                                     continue
+
+                                check_and_click_easter_egg(driver)
                                 check_for_sprechwunsch(driver, wait)
                                 mission_title = wait.until(EC.presence_of_element_located((By.ID, 'missionH1')))
                                 if "Verband" in mission_title.text:
