@@ -85,7 +85,8 @@ VEHICLE_MAPPINGS = {
     "Mehrzweckkraftwagen": "MzKW",
     "MzGW (FGr N)": "MzKW",
     "Tankwagen": "TKW",
-    "NEA50": "NEA50"
+    "NEA50": "NEA50",
+    "LNA": "Kdow LNA"
 }
 
 PARTIAL_MATCHES = {
@@ -170,8 +171,8 @@ def extract_vehicle_requirements(table):
             if len(cells) == 2:
                 vehicle_text = cells[0].text.strip()
                 value_text = cells[1].text.strip()
-                
-                # Jetzt werden auch "feuerwehrmann" berücksichtigt (Singular oder Plural)
+                if "anforderungswahrscheinlichkeit" in vehicle_text.lower():
+                    continue
                 if "feuerwehrleute" in vehicle_text.lower() or "feuerwehrmann" in vehicle_text.lower():
                     total_firefighters = int(value_text)
                     lf_count = (total_firefighters + 2) // 3
@@ -184,6 +185,14 @@ def extract_vehicle_requirements(table):
                     else:
                         matched_vehicle = smart_vehicle_match(base_vehicle)
                     requirements[matched_vehicle] = count
+                else:
+                    matched_vehicle = smart_vehicle_match(vehicle_text)
+                    try:
+                        count = int(value_text)
+                        if matched_vehicle in VEHICLE_MAPPINGS.values():
+                            requirements[matched_vehicle] = max(requirements.get(matched_vehicle, 0), count)
+                    except ValueError:
+                        continue
         except Exception as e:
             logging.error(f"Error extracting requirements: {str(e)}")
     return requirements
@@ -257,32 +266,15 @@ def extract_missing_water(driver):
     return 0  # Kein Wasser benötigt lol
 
 def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute_personnel, min_patients, nef_probability):
-    # Falls enroute_personnel None sein sollte
     if enroute_personnel is None:
         enroute_personnel = 0
-
     actual_count, nef_in_divs = extract_actual_patients(driver)
     final_patient_count = max(min_patients, actual_count)
-
-    # Für NEF: Zähle NEF und NAW als Ersatz zusammen
     current_nef = current_vehicles.get("NEF", 0) + current_vehicles.get("NAW", 0)
     current_rtw = current_vehicles.get("RTW", 0)
-
-    # RTW-Anforderung: fehlt die Differenz zwischen final_patient_count und vorhandenen RTWs
     needed_rtw = max(0, final_patient_count - current_rtw)
-    # Für NEF: maximal ein NEF benötigt, falls bislang keiner (bzw. kein NAW als Ersatz) unterwegs ist
     needed_nef_total = max(0, nef_in_divs - current_nef)
     needed_nef = 1 if needed_nef_total > 0 else 0
-
-    # Bestehende LNA-Anforderungen (angenommen "Benötigte LNA" kommt als Schlüssel in required_vehicles vor)
-    required_lna = required_vehicles.get("LNA", 0)
-    if required_lna:
-        # Nur ein KdoW LNA senden – sofern noch keiner unterwegs ist
-        if current_vehicles.get("KdoW LNA", 0) < 1:
-            required_vehicles["KdoW LNA"] = 1
-        # Übergebe/überschreibe den ursprünglichen LNA-Schlüssel
-        if "LNA" in required_vehicles:
-            del required_vehicles["LNA"]
 
     if needed_rtw > 0 and needed_nef > 0:
         current_naw = current_vehicles.get("NAW", 0)
@@ -302,12 +294,27 @@ def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute
     elif needed_nef > 0:
         required_vehicles["NEF"] = required_vehicles.get("NEF", 0) + needed_nef
 
-    # Falls NEF benötigt wird, aber noch keiner unterwegs ist, 
-    # könnte bereits ein NAW als NEF gesendet worden sein – hier ist zusätzlich keine weitere NEF-Alarmierung nötig.
     if needed_nef > 0 and current_nef > 0:
         logging.info("NEF requirement already met by NEF/NAW on route.")
 
-    # Fehlendes Personal auslesen | 3 Pro LF als Faustregel
+    lna_needed = False
+    try:
+        patient_divs = driver.find_elements(By.CSS_SELECTOR, ".mission_patient")
+        for patient in patient_divs:
+            try:
+                alert_div = patient.find_element(By.CSS_SELECTOR, ".alert.alert-danger")
+                if "LNA" in alert_div.text:
+                    lna_needed = True
+                    break
+            except:
+                continue
+    except Exception as e:
+        logging.error(f"Error checking LNA requirement: {str(e)}")
+    if lna_needed:
+        if current_vehicles.get("KdoW LNA", 0) < 1:
+            logging.info("LNA requirement found. Dispatching 1 KdoW LNA.")
+            required_vehicles["KdoW LNA"] = 1
+
     try:
         missing_personnel = extract_missing_personnel(driver)
         if missing_personnel is None:
@@ -316,11 +323,25 @@ def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute
     except Exception as e:
         logging.error(f"Error extracting missing personnel: {str(e)}")
         missing_personnel = 0
-
     if missing_personnel > 0:
         lf_needed = (missing_personnel + 2) // 3
         required_vehicles["LF"] = required_vehicles.get("LF", 0) + lf_needed
         logging.info(f"Missing personnel: {missing_personnel}, dispatching {lf_needed} LF")
+
+    try:
+        alert = driver.find_element(By.CSS_SELECTOR, ".alert-missing-vehicles")
+        alert_text = alert.text.strip()
+        training_match = re.search(r'(\d+)\s+Person(?:en)?\s+mit\s+([\w\s\-\(\)]+)-Ausbildung', alert_text, re.IGNORECASE)
+        if training_match:
+            count_training = int(training_match.group(1))
+            training_type = training_match.group(2).strip()
+            mapped_type = smart_vehicle_match(training_type)
+            current_training = current_vehicles.get(mapped_type, 0)
+            if current_training < count_training:
+                required_vehicles[mapped_type] = max(required_vehicles.get(mapped_type, 0), count_training)
+                logging.info(f"Dispatching {mapped_type} for missing personnel with training: {training_type}")
+    except Exception as e:
+        logging.error(f"Error checking personnel training requirement: {str(e)}")
 
     return required_vehicles
 
@@ -398,7 +419,7 @@ def select_vehicles(driver, required_vehicles, alarm_after_selection=True):
         alarm_button = driver.find_element(By.ID, 'mission_alarm_btn')
         alarm_button.click()
         logging.info("Alarm button clicked")
-        sleep(4.5)
+        sleep(6)
     return selected_any
 
 def handle_water_and_dispatch(driver, missing_vehicles):
@@ -504,6 +525,86 @@ def extract_additional_requirements(driver):
         logging.info("No additional requirements found on mission page.")
     return additional
 
+def select_prisoner_vehicle(driver):
+    def open_link_in_new_tab(link):
+        href = link.get_attribute("href")
+        if not href:
+            logging.warning("No href found on prisoner link.")
+            return False
+        try:
+            # Open the link in a new tab.
+            driver.execute_script("window.open(arguments[0], '_blank');", href)
+            driver.switch_to.window(driver.window_handles[-1])
+            # Wait until the new tab is fully loaded.
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
+            )
+            sleep(0.125)
+            driver.close()
+            driver.switch_to.window(driver.window_handles[0])
+            logging.info(f"Prisoner link opened and closed: {href}")
+            return True
+        except Exception as e:
+            logging.error(f"Error handling prisoner link tab: {e}")
+            try:
+                driver.close()
+            except:
+                pass
+            driver.switch_to.window(driver.window_handles[0])
+            return False
+
+    try:
+        prisoner_container = driver.find_element(By.CLASS_NAME, "vehicle_prisoner_select")
+    except Exception as e:
+        logging.info("No prisoner selection container found on mission page.")
+        return
+
+    try:
+        prisoner_links = prisoner_container.find_elements(By.TAG_NAME, "a")
+        for link in prisoner_links:
+            classes = link.get_attribute("class")
+            if "btn-success" in classes:
+                if open_link_in_new_tab(link):
+                    logging.info(f"Opened normal prisoner vehicle with text: '{link.text}'")
+                    return
+                else:
+                    logging.error("Failed to open normal prisoner vehicle link.")
+        try:
+            verbands_header = prisoner_container.find_element(By.XPATH, ".//h5[contains(text(),'Verbandszellen')]")
+            verbands_links = prisoner_container.find_elements(By.XPATH, ".//h5[contains(text(),'Verbandszellen')]/following-sibling::a")
+        except Exception as e:
+            logging.info("No Verbandszellen links found in prisoner selection.")
+            return
+
+        if not verbands_links:
+            logging.info("No Verbandszellen links available.")
+            return
+
+        selection_candidates = []
+        for link in verbands_links:
+            text = link.text
+            perc_match = re.search(r'Abgabe an Besitzer:\s*(\d+)%', text)
+            if perc_match:
+                try:
+                    percentage = int(perc_match.group(1))
+                except:
+                    percentage = 100
+            else:
+                percentage = 100
+            selection_candidates.append((link, percentage))
+        zero_candidates = [tpl for tpl in selection_candidates if tpl[1] == 0]
+        if zero_candidates:
+            chosen = zero_candidates[0][0]
+        else:
+            selection_candidates.sort(key=lambda tpl: tpl[1])
+            chosen = selection_candidates[0][0]
+        if open_link_in_new_tab(chosen):
+            logging.info(f"Opened Verbandszellen prisoner vehicle with text: '{chosen.text}'")
+        else:
+            logging.error("Failed to open Verbandszellen prisoner vehicle link.")
+    except Exception as e:
+        logging.error(f"Error in prisoner vehicle selection: {e}")
+
 def main():
     while True:
         try:
@@ -536,7 +637,6 @@ def main():
                         logging.info("Finishing filter button clicked")
                     except Exception as e:
                         logging.warning(f"Could not click finishing filter button: {str(e)}")
-                    # driver.refresh()
                     sleep(0.25)
                     wait = WebDriverWait(driver, 10)
                     mission_list = wait.until(EC.presence_of_element_located((By.ID, 'mission_list')))
@@ -586,6 +686,7 @@ def main():
 
                                 check_and_click_easter_egg(driver)
                                 check_for_sprechwunsch(driver, wait)
+                                select_prisoner_vehicle(driver)
                                 mission_title = wait.until(EC.presence_of_element_located((By.ID, 'missionH1')))
                                 if "Verband" in mission_title.text:
                                     logging.info("Verband mission detected in title, closing...")
