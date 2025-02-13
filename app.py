@@ -86,7 +86,8 @@ VEHICLE_MAPPINGS = {
     "MzGW (FGr N)": "MzKW",
     "Tankwagen": "TKW",
     "NEA50": "NEA50",
-    "LNA": "Kdow LNA"
+    "LNA": "KdoW LNA",
+    "OrgL": "KdoW OrgL"
 }
 
 PARTIAL_MATCHES = {
@@ -144,7 +145,7 @@ def extract_current_vehicles(driver):
                 if personnel_text.isdigit():
                     enroute_personnel += int(personnel_text)
     except Exception as e:
-        logging.error(f"Error reading driving vehicles: {str(e)}")
+        logging.error(f"error reading coming vehicles | no vehicles on route")
     sleep(0.25)
     try:
         at_mission_table = driver.find_element(By.ID, 'mission_vehicle_at_mission')
@@ -158,7 +159,7 @@ def extract_current_vehicles(driver):
                     matched_type = smart_vehicle_match(raw_type)
                     current_vehicles[matched_type] = current_vehicles.get(matched_type, 0) + 1
     except Exception as e:
-        logging.error(f"Error reading vehicles at mission: {str(e)}")
+        logging.error(f"Error reading vehicles at mission | no vehicles at mission")
     sleep(0.25)
     return current_vehicles, enroute_personnel
 
@@ -173,10 +174,10 @@ def extract_vehicle_requirements(table):
                 value_text = cells[1].text.strip()
                 if "anforderungswahrscheinlichkeit" in vehicle_text.lower():
                     continue
-                if "feuerwehrleute" in vehicle_text.lower() or "feuerwehrmann" in vehicle_text.lower():
-                    total_firefighters = int(value_text)
-                    lf_count = (total_firefighters + 2) // 3
-                    requirements["LF"] = requirements.get("LF", 0) + lf_count
+                # if "feuerwehrleute" in vehicle_text.lower() or "feuerwehrmann" in vehicle_text.lower():
+                #     total_firefighters = int(value_text)
+                #     lf_count = (total_firefighters + 2) // 3
+                #     requirements["LF"] = requirements.get("LF", 0) + lf_count
                 elif vehicle_text.startswith('Benötigte '):
                     base_vehicle = vehicle_text.replace('Benötigte ', '').strip()
                     count = int(value_text)
@@ -247,6 +248,8 @@ def extract_missing_personnel(driver):
         if match:
             number = int(match.group(1))
             return number
+        if "Feuerwehrmann" in text:
+            return 1
     except:
         return 0
 
@@ -298,11 +301,19 @@ def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute
         logging.info("NEF requirement already met by NEF/NAW on route.")
 
     lna_needed = False
+    orgl_needed = False
+    tragehilfe_needed = False
     try:
         patient_divs = driver.find_elements(By.CSS_SELECTOR, ".mission_patient")
         for patient in patient_divs:
             try:
                 alert_div = patient.find_element(By.CSS_SELECTOR, ".alert.alert-danger")
+                if "Tragehilfe" in alert_div.text:
+                    tragehilfe_needed = True
+                if "OrgL" in alert_div.text:
+                    orgl_needed = True
+                    if "LNA" in alert_div.text and lna_needed == True:
+                        break
                 if "LNA" in alert_div.text:
                     lna_needed = True
                     break
@@ -314,7 +325,14 @@ def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute
         if current_vehicles.get("KdoW LNA", 0) < 1:
             logging.info("LNA requirement found. Dispatching 1 KdoW LNA.")
             required_vehicles["KdoW LNA"] = 1
-
+    if tragehilfe_needed:
+        if current_vehicles.get("LF", 0) < 1:
+            logging.info("Tragehilfe requirement found. Dispatching 1 LF.")
+            required_vehicles["LF"] = 1
+    if orgl_needed:
+        if current_vehicles.get("KdoW OrgL", 0) < 1:
+            logging.info("OrgL requirement found. Dispatching 1 KdoW OrgL.")
+            required_vehicles["KdoW OrgL"] = 1
     try:
         missing_personnel = extract_missing_personnel(driver)
         if missing_personnel is None:
@@ -370,8 +388,8 @@ def set_mission_speed(driver, desired_speed):
         sleep(0.125)
         driver.close()
         driver.switch_to.window(driver.window_handles[0])
-    elif desired_speed == "7" and current_speed == "pause":
-        driver.execute_script("window.open('/missionSpeed?speed=7','_blank')")
+    elif current_speed == "pause" and desired_speed != "pause":
+        driver.execute_script(f"window.open('/missionSpeed?speed={desired_speed}','_blank')")
         driver.switch_to.window(driver.window_handles[-1])
         sleep(0.125)
         driver.close()
@@ -464,14 +482,24 @@ def check_for_sprechwunsch(driver, wait):
                     wait.until(EC.presence_of_element_located((By.ID, 'own-hospitals')))
                     hospitals_table = driver.find_element(By.ID, 'own-hospitals')
                     rows = hospitals_table.find_elements(By.TAG_NAME, 'tr')
-                    if len(rows) > 1:
-                        first_row = rows[1]
-                        approach_link = first_row.find_element(By.CSS_SELECTOR, "a.btn.btn-success").get_attribute("href")
-                        driver.execute_script(f"window.open('{approach_link}','_blank')")
+                    chosen_link = None
+                    for row in rows[1:]:
+                        try:
+                            button = row.find_element(By.XPATH, ".//a")
+                            class_attr = button.get_attribute("class")
+                            if "btn-success" in class_attr:
+                                chosen_link = button.get_attribute("href")
+                                break
+                        except Exception:
+                            continue
+                    if chosen_link:
+                        driver.execute_script(f"window.open('{chosen_link}','_blank')")
                         driver.switch_to.window(driver.window_handles[-1])
                         sleep(0.125)
                         driver.close()
                         driver.switch_to.window(driver.window_handles[-1])
+                    else:
+                        logging.info("Kein verfügbares Krankenhaus mit freien Betten gefunden.")
                 except Exception as e:
                     logging.error(f"Error handling sprechwunsch/hospitals: {str(e)}")
                 driver.close()
@@ -605,6 +633,37 @@ def select_prisoner_vehicle(driver):
     except Exception as e:
         logging.error(f"Error in prisoner vehicle selection: {e}")
 
+def claim_rewards(driver):
+    try:
+        driver.execute_script("window.open('https://www.leitstellenspiel.de/tasks/index','_blank');")
+        driver.switch_to.window(driver.window_handles[-1])
+        WebDriverWait(driver, 10).until(
+            lambda d: d.execute_script("return document.readyState") == "complete"
+        )
+        sleep(0.5)
+        # Sucht das Formular, das den "Alle abholen"-Button beinhaltet.
+        reward_forms = driver.find_elements(By.XPATH, "//form[contains(@class,'button_to') and contains(@action, '/tasks/claim_all_rewards')]")
+        if reward_forms:
+            form = reward_forms[0]
+            if form.is_displayed():
+                # Anstelle eines Klicks wird das Formular per JavaScript abgeschickt.
+                driver.execute_script("arguments[0].submit();", form)
+                logging.info("Reward form submitted: Alle abholen")
+                sleep(1.2)
+            else:
+                logging.info("Reward form found but not interactable.")
+        else:
+            logging.info("No rewards available to claim.")
+        driver.close()
+        driver.switch_to.window(driver.window_handles[0])
+    except Exception as e:
+        logging.error(f"Error claiming rewards (alternative approach): {e}")
+        try:
+            driver.close()
+        except Exception:
+            pass
+        driver.switch_to.window(driver.window_handles[0])
+
 def main():
     while True:
         try:
@@ -639,6 +698,7 @@ def main():
                         logging.warning(f"Could not click finishing filter button: {str(e)}")
                     sleep(0.25)
                     wait = WebDriverWait(driver, 10)
+                    # claim_rewards(driver) klappt noch nicht
                     mission_list = wait.until(EC.presence_of_element_located((By.ID, 'mission_list')))
                     mission_entries = driver.find_elements(By.CLASS_NAME, 'missionSideBarEntry')
                     non_finishing_missions = [
@@ -648,12 +708,12 @@ def main():
                             "[Verband]" not in m.find_element(By.CLASS_NAME, 'map_position_mover').text
                         )
                     ]
-                    if len(non_finishing_missions) > 4:
+                    if len(non_finishing_missions) >= 8:
                         set_mission_speed(driver, "pause")
                         logging.info("Mission speed set to pause")
-                    if len(non_finishing_missions) < 6:
-                        set_mission_speed(driver, "7")
-                        logging.info("Mission speed set to 7")
+                    if len(non_finishing_missions) <= 7:
+                        set_mission_speed(driver, "1")
+                        logging.info("Mission speed set to 1")
                     logging.info(f"Found {len(non_finishing_missions)} non-Verband missions")
                     sleep(0.225)
                     for mission in non_finishing_missions:
