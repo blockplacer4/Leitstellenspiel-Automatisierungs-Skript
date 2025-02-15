@@ -296,9 +296,12 @@ def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute
         required_vehicles["RTW"] = required_vehicles.get("RTW", 0) + needed_rtw
     elif needed_nef > 0:
         required_vehicles["NEF"] = required_vehicles.get("NEF", 0) + needed_nef
-
+    
     if needed_nef > 0 and current_nef > 0:
         logging.info("NEF requirement already met by NEF/NAW on route.")
+
+    if final_patient_count > 10 and "ELW 1 (SEG)" not in current_vehicles:
+        required_vehicles["ELW 1 (SEG)"] = 1
 
     lna_needed = False
     orgl_needed = False
