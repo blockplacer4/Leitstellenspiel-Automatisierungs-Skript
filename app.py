@@ -15,6 +15,7 @@ dotenv.load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
+"""
 VEHICLE_MAPPINGS = {
     "Dekon-P": "Dekon-P",
     "Drehleiter": "DLK",
@@ -88,6 +89,110 @@ VEHICLE_MAPPINGS = {
     "NEA50": "NEA50",
     "LNA": "KdoW LNA",
     "OrgL": "KdoW OrgL"
+}
+"""
+
+VEHICLE_MAPPINGS = {
+    # Feuerwehr
+    "LF": "A1 LF",
+    "Löschfahrzeug": "A1 LF",
+    "RW": "A2 RW",
+    "Drehleiter": "A3 Drehleiter",
+    "ELW 1": "A4 ELW 1",
+    "Feuerwehrkran": "A6 Feuerwehrkran",
+    "Feuerwehrkräne (FwK)": "A6 Feuerwehrkran",
+    "TLF": "A7 TLF",
+    "GTLF": "A8 GTLF",
+    "MTW": "A9 MTW",
+    "ELW 1 Drohne": "D1 ELW 1 Drohne",
+    "ELW 2 Drohne": "D2 ELW 2 Drohne",
+    "MTF Drohne": "D3 MTF Drohne",
+    "Lüfter": "D4 Lüfter",
+
+    # Gefahrgut & Werkfeuerwehr
+    "GW-Atemschutz": "GW-Atemschutz",
+    "GW-Dekon-P": "GW-Dekon-P",
+    "GW-Gefahrgut": "GW-Gefahrgut",
+    "GW-Höhenrettung": "GW-Höhenrettung",
+    "GW-Messtechnik": "GW-Messtechnik",
+    "GW-Öl": "GW-Öl",
+    "GW-S": "GW-S",
+    "GW-Schlauchanhänger": "GW-Schlauchanhänger",
+    "GW-Werkfeuerwehr": "GW-Werkfeuerwehr",
+
+    # Flughafenfeuerwehr
+    "Flughafenfeuerwehr": "S0 Flughafenfeuerwehr",
+    "Flugfeldlöschfahrzeug": "S5 Flugfeldlöschfahrzeug",
+    "Rettungstreppe": "S5 Rettungstreppe",
+    "Turbolöscher": "S Turbolöcher",
+    "ULF": "S ULF",
+
+    # Rettungsdienst (nur Basis-Fahrzeuge)
+    "NAW": "RET1 NAW",
+    "RTW": "RET2 RTW",
+    "RTH": "RET3 RTH",
+    "ITW": "RET4 ITW",
+    "LNA": "RET6 KdoW-LNA",
+    "Orgl": "RET6 KdoW-Orgl.",
+    "GRTW m. NA": "RET7 GRTW m. NA",
+    "GRTW o. NA": "RET7 GRTW o. NA",
+
+    # Polizei
+    "Funkstreifenwagen": "Pol1 Funkstreifenwagen",
+    "FuStW (DGL)": "Pol1 FuStW (DGL)",
+    "Polizeihubschrauber": "Pol2 Polizeihubschrauber",
+    "Polizeimotorrad": "Pol3 Polizeimotorrad",
+    "Zivilstreifenwagen": "Pol4 Zivilstreifenwagen",
+    "FüKw": "SEK1 FüKw",
+    "leBefKw": "SEK2 leBefKw",
+    "GefKw": "SEK3 GefKw",
+    "GruKw": "SEK3 GruKw",
+    "WaWe": "SEK3 WaWe",
+    "MTF": "SEK5 - MTF",
+    "ZF": "SEK5 - ZF",
+    "DHuFüKw": "SEK6 DHuFüKw",
+    "MEK": "SEK7 MEK",
+    "Reiterstaffel": "SEKRO Reiterstaffel",
+
+    # THW
+    "Anhänger 7 t": "Anhänger 7 t",
+    "Anhänger Druckluftversorgung": "Anhänger Druckluftversorgung",
+    "Anhänger Führung und Lage": "Anhänger Führung und Lage",
+    "Anhänger Pferdetransport": "Anhänger Pferdetransport",
+    "Anhänger MzB": "Anhänger MzB",
+    "Anhänger SchlB": "Anhänger SchlB",
+    "Anhänger SpuW": "Anhänger SpuW",
+    "Fernmeldekraftwagen": "Fernmeldekraftwagen",
+    "Führungskraftwagen": "Führungskraftwagen",
+    "GKW": "Gerätefahrzeug (GKW)",
+    "LKW 7 Lbw (FGr E)": "LKW 7 Lbw (FGr E)",
+    "LKW K 9": "LKW K 9",
+    "MLW 4": "MLW 4",
+    "MTW-TZ": "MTW Technischer Zug (MTW-TZ - THW)",
+    "MzGw (FGr N)": "MzGw (FGr N)",
+    "NEA 200": "NEA 200",
+    "Radlader": "Radlader",
+
+    # Wasserrettung & DLRG
+    "Boot": "Boot",
+    "ELW 1 (Wasser)": "ELW 1",
+    "GW-Höhenrettung (Bergrettung)": "GW-Höhenrettung (Bergrettung)",
+    "GW-Taucher": "GW-Taucher",
+    "GW-Wasserrettung": "GW-Wasserrettung",
+    "Mehrzweckboot": "Mehrzweckboot",
+
+    # Betreuung & Bergwacht
+    "Alarm Betreuung": "X Alarm Betreuung",
+    "Anh Feldkochherd": "X Anh Feldkochherd",
+    "Betreuungskombi": "X Betreuungskombi",
+    "Gerätewagen Betreuung": "X Gerätewagen Betreuung",
+    "Bergwacht": "Z0 Bergwacht",
+    "ATV": "Z ATV",
+    "ELW Bergrettung": "Z ELW Bergrettung",
+    "GW Bergrettung": "Z GW Bergrettung",
+    "GW Bergrettung (NEF)": "Z GW Bergrettung (NEF)",
+    "Hundestaffel (Bergrettung)": "Z Hundestaffel (Bergrettung)",
+    "Schneefahrzeug": "Z Schneefahrzeug"
 }
 
 PARTIAL_MATCHES = {
