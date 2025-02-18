@@ -99,17 +99,20 @@ PARTIAL_MATCHES = {
     "sanität": "GW-S",
     "drehleiter": "DLK",
     "rüst": "RW",
+    "dlk": "DLK",
+    "hlf 20": "RW",
+    "hlf": "RW",
+    "rw": "RW",
     "tlf": "LF",
     "lf": "LF",
-    "dlk": "DLK",
-    "hlf": "RW",
-    "hlf 20": "RW",
-    "rw": "RW",
     "streifenwagen": "FuStW",
     "GW-Mess": "GW-M",
 }
-
 def smart_vehicle_match(vehicle_name):
+    if vehicle_name.lower().startswith("hlf"):
+        return "HLF 20"
+    # ich glaube man sieht, dass ich faul bin, sry X.x   
+    # **Hust** handle_lf_and_rw_requirements Funktion **Hust**    
     if vehicle_name in VEHICLE_MAPPINGS:
         return VEHICLE_MAPPINGS[vehicle_name]
     vehicle_lower = vehicle_name.lower()
@@ -137,9 +140,14 @@ def extract_current_vehicles(driver):
             cells = row.find_elements(By.TAG_NAME, 'td')
             if len(cells) >= 3:
                 vehicle_cell = cells[1].text
+                logging.info(f"Vehicle cell: {vehicle_cell}")
                 personnel_text = cells[2].text.strip()
                 if '(' in vehicle_cell and ')' in vehicle_cell:
-                    raw_type = vehicle_cell.split('(')[1].split(')')[0].strip()
+                    if vehicle_cell.count('(') > 1:
+                        raw_type = vehicle_cell.strip()
+                        # für sowas, wie "ELW 1 (SEG)", damit es halt klappt, weil halt doppelte Klammer, also (ELW 1 (SEG))
+                    else:
+                        raw_type = re.search(r'\(([^)]+)\)', vehicle_cell).group(1).strip()
                     matched_type = smart_vehicle_match(raw_type)
                     current_vehicles[matched_type] = current_vehicles.get(matched_type, 0) + 1
                 if personnel_text.isdigit():
@@ -268,6 +276,31 @@ def extract_missing_water(driver):
         # logging.error(f"Error extracting missing water: {str(e)}")
     return 0  # Kein Wasser benötigt lol
 
+def handle_lf_and_rw_requirements(required_vehicles, current_vehicles):
+    current_hfl = current_vehicles.get("HLF 20", 0)
+    required_rw = required_vehicles.get("RW", 0)
+    required_lf = required_vehicles.get("LF", 0)
+
+    if current_hfl > required_rw:
+        reduction = min(current_hfl, required_rw)
+        required_vehicles.pop("RW", None)
+        current_hfl -= reduction
+        logging.info(f"RW requirements are already satisfied by {reduction} HLF 20.")
+    else:
+        required_vehicles["RW"] -= current_hfl
+        current_hfl = 0
+        logging.info("RW requirement are not fully met by HLF 20.")
+        
+    if current_hfl > 0 and required_lf > 0:
+        reduction = min(current_hfl, required_lf)
+        required_lf -= reduction
+        required_vehicles["LF"] = max(0, required_lf)
+        current_hfl -= reduction
+        logging.info(f"LF requirement reduced by {reduction} HLF 20.")
+
+    current_vehicles.pop("HLF 20", None)
+    return required_vehicles, current_vehicles
+
 def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute_personnel, min_patients, nef_probability):
     if enroute_personnel is None:
         enroute_personnel = 0
@@ -300,7 +333,7 @@ def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute
     if needed_nef > 0 and current_nef > 0:
         logging.info("NEF requirement already met by NEF/NAW on route.")
 
-    if final_patient_count > 10 and "ELW 1 (SEG)" not in current_vehicles:
+    if final_patient_count > 10 and "SEG" not in current_vehicles:
         required_vehicles["ELW 1 (SEG)"] = 1
 
     lna_needed = False
@@ -771,6 +804,7 @@ def main():
                                     vehicle_div = col_md_4_divs[1]
                                     requirements_table = vehicle_div.find_element(By.TAG_NAME, 'table')
                                     required_vehicles = extract_vehicle_requirements(requirements_table)
+                                    required_vehicles, current_vehicles = handle_lf_and_rw_requirements(required_vehicles, current_vehicles) 
                                     min_patients, nef_probability = extract_patient_requirements(col_md_4_divs)
                                     sleep(0.05)
                                     driver.close()
