@@ -129,6 +129,30 @@ def smart_vehicle_match(vehicle_name):
         return VEHICLE_MAPPINGS[possible_matches[0]]
     return vehicle_name
 
+def extract_vehicle_type(vehicle_cell):
+    if '(' not in vehicle_cell or ')' not in vehicle_cell:
+        return vehicle_cell.strip()
+    
+    # Für Fälle wie "MzGW (FGr N) (MzGW (FGr N))"
+    if vehicle_cell.count('(') > 2:
+        # Nimm den Teil zwischen dem letzten Klammerpaar
+        last_open = vehicle_cell.rindex('(')
+        last_close = vehicle_cell.rindex(')')
+        return vehicle_cell[last_open+1:last_close].strip()
+    
+    # Für Fälle wie "ELW 1 (SEG)" oder andere normale Klammern
+    if vehicle_cell.count('(') > 1:
+        raw_type = vehicle_cell.strip()
+    else:
+        # Für normale Fälle wie "(LF 20)"
+        match = re.search(r'\(([^)]+)\)', vehicle_cell)
+        if match:
+            raw_type = match.group(1).strip()
+        else:
+            raw_type = vehicle_cell.strip()
+    
+    return raw_type
+
 def extract_current_vehicles(driver):
     current_vehicles = {}
     enroute_personnel = 0
@@ -140,21 +164,17 @@ def extract_current_vehicles(driver):
             cells = row.find_elements(By.TAG_NAME, 'td')
             if len(cells) >= 3:
                 vehicle_cell = cells[1].text
-                logging.info(f"Vehicle cell: {vehicle_cell}")
                 personnel_text = cells[2].text.strip()
                 if '(' in vehicle_cell and ')' in vehicle_cell:
-                    if vehicle_cell.count('(') > 1:
-                        raw_type = vehicle_cell.strip()
-                        # für sowas, wie "ELW 1 (SEG)", damit es halt klappt, weil halt doppelte Klammer, also (ELW 1 (SEG))
-                    else:
-                        raw_type = re.search(r'\(([^)]+)\)', vehicle_cell).group(1).strip()
+                    raw_type = extract_vehicle_type(vehicle_cell)
                     matched_type = smart_vehicle_match(raw_type)
                     current_vehicles[matched_type] = current_vehicles.get(matched_type, 0) + 1
                 if personnel_text.isdigit():
                     enroute_personnel += int(personnel_text)
     except Exception as e:
         logging.error(f"error reading coming vehicles | no vehicles on route")
-    sleep(0.25)
+    
+    sleep(0.5)
     try:
         at_mission_table = driver.find_element(By.ID, 'mission_vehicle_at_mission')
         rows = at_mission_table.find_elements(By.TAG_NAME, 'tr')
@@ -162,12 +182,14 @@ def extract_current_vehicles(driver):
             cells = row.find_elements(By.TAG_NAME, 'td')
             if len(cells) >= 2:
                 vehicle_cell = cells[1].text
+                logging.info(f"Vehicle cell: {vehicle_cell}")
                 if '(' in vehicle_cell and ')' in vehicle_cell:
-                    raw_type = vehicle_cell.split('(')[1].split(')')[0].strip()
+                    raw_type = extract_vehicle_type(vehicle_cell)
                     matched_type = smart_vehicle_match(raw_type)
                     current_vehicles[matched_type] = current_vehicles.get(matched_type, 0) + 1
     except Exception as e:
         logging.error(f"Error reading vehicles at mission | no vehicles at mission")
+    
     sleep(0.25)
     return current_vehicles, enroute_personnel
 
@@ -181,6 +203,12 @@ def extract_vehicle_requirements(table):
                 vehicle_text = cells[0].text.strip()
                 value_text = cells[1].text.strip()
                 if "anforderungswahrscheinlichkeit" in vehicle_text.lower():
+                    continue
+                if "Feuerwehrleute" in vehicle_text:
+                    continue
+                if "Feuerwehrmann" in vehicle_text:
+                    continue
+                if "Wasserbedarf" in vehicle_text:
                     continue
                 # if "feuerwehrleute" in vehicle_text.lower() or "feuerwehrmann" in vehicle_text.lower():
                 #     total_firefighters = int(value_text)
@@ -253,6 +281,7 @@ def extract_missing_personnel(driver):
         personnel_div = alert_div.find_element(By.CSS_SELECTOR, 'div[data-requirement-type="personnel"]')
         text = personnel_div.text.strip()
         match = re.search(r'(\d+)\s+Feuerwehrleute', text)
+        logging.info(f"Found missing personnel div text: '{text}'")
         if match:
             number = int(match.group(1))
             return number
@@ -299,6 +328,8 @@ def handle_lf_and_rw_requirements(required_vehicles, current_vehicles):
         logging.info(f"LF requirement reduced by {reduction} HLF 20.")
 
     current_vehicles.pop("HLF 20", None)
+    logging.info(f"new required vehicles: {required_vehicles}")
+    logging.info(required_vehicles)
     return required_vehicles, current_vehicles
 
 def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute_personnel, min_patients, nef_probability):
@@ -369,6 +400,7 @@ def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute
         if current_vehicles.get("KdoW OrgL", 0) < 1:
             logging.info("OrgL requirement found. Dispatching 1 KdoW OrgL.")
             required_vehicles["KdoW OrgL"] = 1
+    """            
     try:
         missing_personnel = extract_missing_personnel(driver)
         if missing_personnel is None:
@@ -381,7 +413,7 @@ def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute
         lf_needed = (missing_personnel + 2) // 3
         required_vehicles["LF"] = required_vehicles.get("LF", 0) + lf_needed
         logging.info(f"Missing personnel: {missing_personnel}, dispatching {lf_needed} LF")
-
+    """
     try:
         alert = driver.find_element(By.CSS_SELECTOR, ".alert-missing-vehicles")
         alert_text = alert.text.strip()
@@ -401,11 +433,43 @@ def handle_patients_and_nef(driver, required_vehicles, current_vehicles, enroute
 
 def calculate_missing_vehicles(required_vehicles, current_vehicles):
     missing_vehicles = {}
+    
+    current_hfl = current_vehicles.get("HLF 20", 0)
+    required_rw = required_vehicles.get("RW", 0)
+    required_lf = required_vehicles.get("LF", 0)
+
+    if current_hfl and required_rw:
+        if current_hfl > required_rw:
+            reduction = min(current_hfl, required_rw)
+            required_vehicles.pop("RW", None)
+            current_hfl -= reduction
+            logging.info(f"RW requirements are already satisfied by {reduction} HLF 20.")
+        else:
+            required_vehicles["RW"] = required_rw - current_hfl
+            current_hfl = 0
+            logging.info("RW requirement are not fully met by HLF 20.")
+
+    if current_hfl > 0 and required_lf > 0:
+        reduction = min(current_hfl, required_lf)
+        required_lf -= reduction
+        required_vehicles["LF"] = max(0, required_lf)
+        current_hfl -= reduction
+        logging.info(f"LF requirement reduced by {reduction} HLF 20.")
+
     for vehicle_type, required_count in required_vehicles.items():
-        current_count = current_vehicles.get(vehicle_type, 0)
-        if required_count > current_count:
-            needed = required_count - current_count
-            missing_vehicles[vehicle_type] = needed
+        if vehicle_type in ["RW", "LF"]: 
+            if required_count > 0: 
+                current_count = current_vehicles.get(vehicle_type, 0)
+                if required_count > current_count:
+                    needed = required_count - current_count
+                    missing_vehicles[vehicle_type] = needed
+        else:
+            current_count = current_vehicles.get(vehicle_type, 0)
+            if required_count > current_count:
+                needed = required_count - current_count
+                missing_vehicles[vehicle_type] = needed
+
+    logging.info(f"Final missing vehicles: {missing_vehicles}")
     return missing_vehicles
 
 def set_mission_speed(driver, desired_speed):
@@ -573,21 +637,20 @@ def check_and_click_easter_egg(driver):
     except Exception as e:
         logging.info(f"No Easter egg found or unable to click")
 
-def extract_additional_requirements(driver):
-    additional = {}
+def select_missing_personnel(driver, required_vehicles, enroute_personnel):
     try:
-        mission_info = driver.find_element(By.ID, 'mission_info')
-        info_text = mission_info.text
-        import re
-        match = re.search(r'\d+\s+Person(?:en)?\s+mit\s+([\w\-\(\) ]+)-Ausbildung', info_text, re.IGNORECASE)
-        if match:
-            vehicle_raw = match.group(1).strip()
-            matched_vehicle = smart_vehicle_match(vehicle_raw)
-            additional[matched_vehicle] = 1  # Unabhängig der Zahl wird nur 1 alarmiert
-            logging.info(f"Additional requirement extracted: 1 x {matched_vehicle} (aus '{vehicle_raw}-Ausbildung')")
+        missing_personnel = extract_missing_personnel(driver)
+        if missing_personnel is None:
+            missing_personnel = 0
+        missing_personnel = max(0, missing_personnel - enroute_personnel)
     except Exception as e:
-        logging.info("No additional requirements found on mission page.")
-    return additional
+        logging.error(f"Error extracting missing personnel: {str(e)}")
+        missing_personnel = 0
+    if missing_personnel > 0:
+        lf_needed = (missing_personnel + 2) // 3
+        required_vehicles["LF"] = required_vehicles.get("LF", 0) + lf_needed
+        logging.info(f"Missing personnel: {missing_personnel}, dispatching {lf_needed} LF")
+    return required_vehicles
 
 def select_prisoner_vehicle(driver):
     def open_link_in_new_tab(link):
@@ -744,12 +807,12 @@ def main():
                             "[Verband]" not in m.find_element(By.CLASS_NAME, 'map_position_mover').text
                         )
                     ]
-                    if len(non_finishing_missions) >= 8:
+                    if len(non_finishing_missions) >= 13:
                         set_mission_speed(driver, "pause")
                         logging.info("Mission speed set to pause")
-                    if len(non_finishing_missions) <= 7:
-                        set_mission_speed(driver, "1")
-                        logging.info("Mission speed set to 1")
+                    if len(non_finishing_missions) <= 12:
+                        set_mission_speed(driver, "2")
+                        logging.info("Mission speed set to 2")
                     logging.info(f"Found {len(non_finishing_missions)} non-Verband missions")
                     sleep(0.225)
                     for mission in non_finishing_missions:
@@ -790,7 +853,7 @@ def main():
                                     driver.switch_to.window(driver.window_handles[-1])
                                     continue
                                 current_vehicles, enroute_personnel = extract_current_vehicles(driver)
-                                sleep(0.05)
+                                sleep(0.5)
                                 help_button = driver.find_element(By.ID, 'mission_help')
                                 help_url = help_button.get_attribute('href')
                                 sleep(0.03125)
@@ -804,7 +867,9 @@ def main():
                                     vehicle_div = col_md_4_divs[1]
                                     requirements_table = vehicle_div.find_element(By.TAG_NAME, 'table')
                                     required_vehicles = extract_vehicle_requirements(requirements_table)
-                                    required_vehicles, current_vehicles = handle_lf_and_rw_requirements(required_vehicles, current_vehicles) 
+                                    logging.info(f"Required vehicles: {required_vehicles}")
+                                    logging.info(f"Current vehicles: {current_vehicles}")
+                                    # required_vehicles, current_vehicles = handle_lf_and_rw_requirements(required_vehicles, current_vehicles) 
                                     min_patients, nef_probability = extract_patient_requirements(col_md_4_divs)
                                     sleep(0.05)
                                     driver.close()
@@ -815,7 +880,8 @@ def main():
                                     )
                                     missing_vehicles = calculate_missing_vehicles(required_vehicles, current_vehicles)
                                     sleep(0.05)
-
+                                    missing_vehicles = select_missing_personnel(driver, missing_vehicles, enroute_personnel)
+                                    sleep(0.05)
                                     # Immer handle_water_and_dispatch aufrufen
                                     closed_tab = handle_water_and_dispatch(driver, missing_vehicles)
                                     if closed_tab:
